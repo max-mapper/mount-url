@@ -1,9 +1,11 @@
+#!/usr/bin/env node
+var os = require('os')
 var path = require('path')
 var url = require('url')
 var fuse = require('fuse-bindings')
 var mkdirp = require('mkdirp')
 var contentRange = require('content-range')
-var headers = require('request-headers')
+var requestHeaders = require('request-headers')
 
 var ENOENT = -2
 var EPERM = -1
@@ -19,61 +21,68 @@ var filename = path.basename(parsed.pathname)
 var handlers = {}
 var file
 
-var mnt = path.join(process.cwd(), filename)
+var mnt = path.join(os.tmpdir(), 'mounturl-' + Date.now())
+console.log(mnt)
+
 fuse.unmount(mnt, function () {
   mkdirp(mnt, function () {
     fuse.mount(mnt, handlers)
   })
 })
 
+function cleanup () {
+  fuse.unmount(mnt, function () {
+    process.exit()
+  })
+}
+
 // fuse handlers
-handlers.displayFolder = false
+handlers.displayFolder = true
+
+handlers.readdir = function (path, cb) {
+  if (path === '/') return cb(0, [filename])
+  cb(0)
+}
 
 handlers.getattr = function (filepath, cb) {
   filepath = filepath.slice(1)
-
-  var stat = {}
-
-  stat.ctime = new Date()
-  stat.mtime = new Date()
-  stat.atime = new Date()
-  stat.uid = process.getuid()
-  stat.gid = process.getgid()
-
-  if (file) {
-    stat.size = file.length
-    stat.mode = 33206 // 0100666
-    return cb(0, stat)
-  }
-
-  stat.size = 4096
-  stat.mode = 16877 // 040755
-  cb(0, stat)
-}
-
-handlers.open = function (path, flags, cb) {
-  path = path.slice(1)
-
+  
   requestHeaders(arg, function (err, statusCode, headers) {
     if (err) {
       console.error('HTTP Error')
-      return cb(ENOENT)
+      cb(ENOENT)
+      return cleanup()
     }
-    
+  
     if (!headers['accept-ranges'] || headers['accept-ranges'] !== 'bytes') {
-      console.error('HTTP resource doesnt not support accept-ranges: bytes')
-      return cb(ENOENT)
+      console.error('HTTP resource doesnt support accept-ranges: bytes')
+      cb(ENOENT)
+      return cleanup()
     }
 
-    var length = headers['content-type']
+    var len = headers['content-type']
 
-    if (!length) length = 4096
-    else length = +length
-      
-    file = {length: length}
-      
-    cb(0, 42)
+    if (!len) len = 4096
+    else len = +len
+    
+    file = {length: len}
+    
+    var stat = {}
+
+    stat.ctime = new Date()
+    stat.mtime = new Date()
+    stat.atime = new Date()
+    stat.uid = process.getuid()
+    stat.gid = process.getgid()
+
+    stat.size = file.length
+    stat.mode = 33206 // 0100666
+    return cb(0, stat)
   })
+}
+
+handlers.open = function (path, flags, cb) {
+  cb(0)
 }
 
 handlers.release = function (path, handle, cb) {
