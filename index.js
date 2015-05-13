@@ -4,8 +4,8 @@ var path = require('path')
 var url = require('url')
 var fuse = require('fuse-bindings')
 var mkdirp = require('mkdirp')
-var contentRange = require('content-range')
-var requestHeaders = require('request-headers')
+var request = require('request')
+var through = require('through2')
 
 var ENOENT = -2
 var EPERM = -1
@@ -21,14 +21,37 @@ var filename = path.basename(parsed.pathname)
 var handlers = {}
 var file
 
-var mnt = path.join(os.tmpdir(), 'mounturl-' + Date.now())
-console.log(mnt)
+var mnt = path.join(os.tmpdir(), 'mounturl/' + Date.now())
+console.error(mnt)
 
-fuse.unmount(mnt, function () {
-  mkdirp(mnt, function () {
-    fuse.mount(mnt, handlers)
+requestHeaders(arg, function (err, statusCode, headers) {
+  if (err) {
+    console.error('HTTP Error')
+    process.exit(1)
+  }
+
+  if (!headers['accept-ranges'] || headers['accept-ranges'] !== 'bytes') {
+    console.error('HTTP resource doesnt support accept-ranges: bytes')
+    console.error(headers, statusCode)
+    process.exit(1)
+  }
+
+  var len = headers['content-length']
+
+  if (!len) len = 4096
+  else len = +len
+  
+  file = {length: len, headers: headers}
+  console.error('file', file)
+  
+  fuse.unmount(mnt, function () {
+    mkdirp(mnt, function () {
+      fuse.mount(mnt, handlers)
+    })
   })
 })
+
+process.on('SIGINT', cleanup)
 
 function cleanup () {
   fuse.unmount(mnt, function () {
@@ -36,49 +59,64 @@ function cleanup () {
   })
 }
 
+function requestHeaders (href, cb) {
+  var req = request.get(href)
+
+  req.on('response', function (res) {
+    req.abort()
+    cb(null, res.statusCode, res.headers)
+  })
+  
+  req.on('error', function (err) {
+    cb(err)
+  })
+
+  return req
+}
+
 // fuse handlers
 handlers.displayFolder = true
 
-handlers.readdir = function (path, cb) {
-  if (path === '/') return cb(0, [filename])
+handlers.readdir = function (filepath, cb) {
+  console.error('readdir', filepath)
+  if (filepath === '/') return cb(0, [filename])
   cb(0)
 }
 
 handlers.getattr = function (filepath, cb) {
-  filepath = filepath.slice(1)
+  console.error('getattr', filepath)
+
+  if (filepath.slice(0, 2) === '/.') {
+    return cb(EPERM)
+  }
   
-  requestHeaders(arg, function (err, statusCode, headers) {
-    if (err) {
-      console.error('HTTP Error')
-      cb(ENOENT)
-      return cleanup()
-    }
+  if (filepath === '/') {
+    cb(0, {
+      mtime: new Date(),
+      atime: new Date(),
+      ctime: new Date(),
+      size: 100,
+      mode: 16877,
+      uid: process.getuid(),
+      gid: process.getgid()
+    })
+    return
+  }
   
-    if (!headers['accept-ranges'] || headers['accept-ranges'] !== 'bytes') {
-      console.error('HTTP resource doesnt support accept-ranges: bytes')
-      cb(ENOENT)
-      return cleanup()
-    }
+  if (!file) return cb(EPERM)
+  
+  var stat = {}
 
-    var len = headers['content-type']
+  stat.ctime = new Date()
+  stat.mtime = new Date()
+  stat.atime = new Date()
+  stat.uid = process.getuid()
+  stat.gid = process.getgid()
 
-    if (!len) len = 4096
-    else len = +len
-    
-    file = {length: len}
-    
-    var stat = {}
-
-    stat.ctime = new Date()
-    stat.mtime = new Date()
-    stat.atime = new Date()
-    stat.uid = process.getuid()
-    stat.gid = process.getgid()
-
-    stat.size = file.length
-    stat.mode = 33206 // 0100666
-    return cb(0, stat)
-  })
+  stat.size = file.length
+  stat.mode = 33206 // 0100666
+  console.error('getattr stat', stat)
+  return cb(0, stat)
 }
 
 handlers.open = function (path, flags, cb) {
@@ -89,33 +127,25 @@ handlers.release = function (path, handle, cb) {
   cb(0)
 }
 
-handlers.read = function (path, handle, buf, len, offset, cb) {
+handlers.read = function (filepath, handle, buf, len, offset, cb) {
   if (!file) return cb(ENOENT)
 
-  if (len + offset > file.length) len = file.length - offset
+  var range = offset + '-' + (offset + len) + '/' + file.length
 
-  var range = contentRange.format({
-    name: 'bytes',
-    offset: offset,
-    limit: len,
-    count: len
-  })
-
+  console.log('range read', arg, range)
   var rangeReq = request(arg, {headers: {'content-range': range}})
+  var proxy = through()
+  rangeReq.pipe(proxy)
   
   var loop = function () {
-    var result = rangeReq.read(len)
-    if (!result) return rangeReq.once('readable', loop)
+    var result = proxy.read(len)
+    if (!result) return proxy.once('readable', loop)
     console.error('writing', result.length)
     buf.copy(result)
     return cb(result.length)
   }
 
   loop()
-}
-
-handlers.readdir = function (path, cb) {
-  cb(EPERM)
 }
 
 handlers.write = function (path, handle, buf, len, offset, cb) {
