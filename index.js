@@ -2,6 +2,7 @@
 var os = require('os')
 var path = require('path')
 var url = require('url')
+var fs = require('fs')
 var fuse = require('fuse-bindings')
 var mkdirp = require('mkdirp')
 var request = require('request')
@@ -47,6 +48,12 @@ requestHeaders(arg, function (err, statusCode, headers) {
   fuse.unmount(mnt, function () {
     mkdirp(mnt, function () {
       fuse.mount(mnt, handlers)
+      fs.symlink(path.join(mnt, filename), path.join(process.cwd(), filename), function (err) {
+        if (err) {
+          console.error('Error!', err.message)
+          cleanup(err)
+        }
+      })
     })
   })
 })
@@ -54,8 +61,10 @@ requestHeaders(arg, function (err, statusCode, headers) {
 process.on('SIGINT', cleanup)
 
 function cleanup () {
-  fuse.unmount(mnt, function () {
-    process.exit()
+  fs.unlink(path.join(process.cwd(), filename), function (err) {
+    fuse.unmount(mnt, function () {
+      process.exit()
+    })
   })
 }
 
@@ -130,10 +139,12 @@ handlers.release = function (path, handle, cb) {
 handlers.read = function (filepath, handle, buf, len, offset, cb) {
   if (!file) return cb(ENOENT)
 
-  var range = offset + '-' + (offset + len) + '/' + file.length
+  var range = offset + '-' + (offset + len)
 
-  console.log('range read', arg, range)
-  var rangeReq = request(arg, {headers: {'content-range': range}})
+  var rangeReq = request(arg, {headers: {'Range': 'bytes=' + range}})
+  rangeReq.on('response', function (res) {
+    console.log('rangereq resp', res.statusCode, res.headers)
+  })
   var proxy = through()
   rangeReq.pipe(proxy)
   
