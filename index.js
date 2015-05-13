@@ -33,7 +33,7 @@ requestHeaders(arg, function (err, statusCode, headers) {
   }
 
   if (!headers['accept-ranges'] || headers['accept-ranges'] !== 'bytes') {
-    console.error('HTTP resource doesnt support accept-ranges: bytes')
+    console.error('The HTTP server supplied doesnt support accept-ranges: bytes, so mount-url wont work for this url, sorry.')
     debug(headers, statusCode)
     process.exit(1)
   }
