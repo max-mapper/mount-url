@@ -38,15 +38,22 @@ module.exports = function (href, cb) {
   
     fuse.unmount(mnt, function () {
       mkdirp(mnt, function () {
-        fuse.mount(mnt, handlers)
-        fs.symlink(path.join(mnt, filename), path.join(process.cwd(), filename), function (err) {
+        fuse.mount(mnt, handlers, function (err) {
           if (err) {
             cleanup(function () {
-              cb(new Error('Symlink error: ' + err.message))
+              cb(new Error('Mount error: ' + err.message))
             })
             return
           }
-          cb(null, cleanup)
+          fs.symlink(path.join(mnt, filename), path.join(process.cwd(), filename), function (err) {
+            if (err) {
+              cleanup(function () {
+                cb(new Error('Symlink error: ' + err.message))
+              })
+              return
+            }
+            cb(null, cleanup)
+          })
         })
       })
     })
