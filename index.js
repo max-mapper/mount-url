@@ -7,6 +7,7 @@ var fuse = require('fuse-bindings')
 var mkdirp = require('mkdirp')
 var request = require('request')
 var through = require('through2')
+var debug = require('debug')('mount-url')
 
 var ENOENT = -2
 var EPERM = -1
@@ -23,7 +24,7 @@ var handlers = {}
 var file
 
 var mnt = path.join(os.tmpdir(), 'mounturl/' + Date.now())
-console.error(mnt)
+debug(mnt)
 
 requestHeaders(arg, function (err, statusCode, headers) {
   if (err) {
@@ -33,7 +34,7 @@ requestHeaders(arg, function (err, statusCode, headers) {
 
   if (!headers['accept-ranges'] || headers['accept-ranges'] !== 'bytes') {
     console.error('HTTP resource doesnt support accept-ranges: bytes')
-    console.error(headers, statusCode)
+    debug(headers, statusCode)
     process.exit(1)
   }
 
@@ -43,7 +44,7 @@ requestHeaders(arg, function (err, statusCode, headers) {
   else len = +len
   
   file = {length: len, headers: headers}
-  console.error('file', file)
+  debug('file', file)
   
   fuse.unmount(mnt, function () {
     mkdirp(mnt, function () {
@@ -87,13 +88,13 @@ function requestHeaders (href, cb) {
 handlers.displayFolder = true
 
 handlers.readdir = function (filepath, cb) {
-  console.error('readdir', filepath)
+  debug('readdir', filepath)
   if (filepath === '/') return cb(0, [filename])
   cb(0)
 }
 
 handlers.getattr = function (filepath, cb) {
-  console.error('getattr', filepath)
+  debug('getattr', filepath)
 
   if (filepath.slice(0, 2) === '/.') {
     return cb(EPERM)
@@ -124,7 +125,7 @@ handlers.getattr = function (filepath, cb) {
 
   stat.size = file.length
   stat.mode = 33206 // 0100666
-  console.error('getattr stat', stat)
+  debug('getattr stat', stat)
   return cb(0, stat)
 }
 
@@ -145,7 +146,7 @@ handlers.read = function (filepath, handle, buf, len, offset, cb) {
   var rangeReq = request(arg, {headers: {'Range': 'bytes=' + range}})
   rangeReq.on('response', function (res) {
     contentLength = +res.headers['content-length']
-    console.log('requested', range, 'received', contentLength, 'bytes')
+    debug('requested', range, 'received', contentLength, 'bytes')
     loop()
   })
   var proxy = through()
@@ -154,7 +155,7 @@ handlers.read = function (filepath, handle, buf, len, offset, cb) {
   var loop = function () {
     var result = proxy.read(contentLength)
     if (!result) return proxy.once('readable', loop)
-    buf.copy(result)
+    result.copy(buf)
     return cb(result.length)
   }
 }
