@@ -139,24 +139,24 @@ handlers.release = function (path, handle, cb) {
 handlers.read = function (filepath, handle, buf, len, offset, cb) {
   if (!file) return cb(ENOENT)
 
-  var range = offset + '-' + (offset + len)
+  var range = offset + '-' + (offset + len - 1)
+  var contentLength
 
   var rangeReq = request(arg, {headers: {'Range': 'bytes=' + range}})
   rangeReq.on('response', function (res) {
-    console.log('rangereq resp', res.statusCode, res.headers)
+    contentLength = +res.headers['content-length']
+    console.log('requested', range, 'received', contentLength, 'bytes')
+    loop()
   })
   var proxy = through()
   rangeReq.pipe(proxy)
   
   var loop = function () {
-    var result = proxy.read(len)
+    var result = proxy.read(contentLength)
     if (!result) return proxy.once('readable', loop)
-    console.error('writing', result.length)
     buf.copy(result)
     return cb(result.length)
   }
-
-  loop()
 }
 
 handlers.write = function (path, handle, buf, len, offset, cb) {
