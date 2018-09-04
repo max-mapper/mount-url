@@ -13,9 +13,13 @@ var EPERM = -1
 
 module.exports = function (href, cb) {
   var parsed = url.parse(href)
-  var filename = path.basename(parsed.pathname)
+  var filename = process.env.FILENAME || path.basename(parsed.pathname)
   var handlers = {}
   var file
+  
+  if(filename == ""){
+    filename = "index.html"
+  }
 
   var mnt = path.join(os.tmpdir(), 'mounturl/' + Date.now())
   debug(mnt)
