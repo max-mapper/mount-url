@@ -8,8 +8,7 @@ var request = require('request')
 var through = require('through2')
 var debug = require('debug')('mount-url')
 
-var ENOENT = -2
-var EPERM = -1
+const dbug = true
 
 module.exports = function (href, cb) {
   var parsed = url.parse(href)
@@ -17,14 +16,14 @@ module.exports = function (href, cb) {
   var handlers = {}
   var file
 
-  var mnt = path.join(os.tmpdir(), 'mounturl/' + Date.now())
-  debug(mnt)
+  var mnt = path.join(os.tmpdir(), 'mounturl/' + Date.now() + '-' + Math.floor(Math.random() * 900000 + 100000))
+  if (dbug) debug(mnt)
 
   requestHeaders(href, function (err, statusCode, headers) {
     if (err) return cb(new Error('HTTP Error ' + statusCode))
 
     if (!headers['accept-ranges'] || headers['accept-ranges'] !== 'bytes') {
-      debug('range not supported', headers, statusCode)
+      if (dbug) debug('range not supported', headers, statusCode)
       return cb(new Error('The HTTP server supplied doesnt support accept-ranges: bytes, so mount-url wont work for this url, sorry.'))
     }
 
@@ -34,7 +33,7 @@ module.exports = function (href, cb) {
     else len = +len
   
     file = {length: len, headers: headers}
-    debug('file', file)
+    if (dbug) debug('file', file)
   
     fuse.unmount(mnt, function () {
       mkdirp(mnt, function () {
@@ -86,16 +85,16 @@ module.exports = function (href, cb) {
   handlers.displayFolder = true
 
   handlers.readdir = function (filepath, cb) {
-    debug('readdir', filepath)
+    if (dbug) debug('readdir', filepath)
     if (filepath === '/') return cb(0, [filename])
     cb(0)
   }
 
   handlers.getattr = function (filepath, cb) {
-    debug('getattr', filepath)
+    if (dbug) debug('getattr', filepath)
 
     if (filepath.slice(0, 2) === '/.') {
-      return cb(EPERM)
+      return cb(fuse.EPERM)
     }
   
     if (filepath === '/') {
@@ -103,7 +102,8 @@ module.exports = function (href, cb) {
         mtime: new Date(),
         atime: new Date(),
         ctime: new Date(),
-        size: 100,
+        nlink: 2,
+        size: 4096,
         mode: 16877,
         uid: process.getuid(),
         gid: process.getgid()
@@ -111,19 +111,20 @@ module.exports = function (href, cb) {
       return
     }
   
-    if (!file) return cb(EPERM)
+    if (!file) return cb(fuse.EPERM)
   
     var stat = {}
 
     stat.ctime = new Date()
     stat.mtime = new Date()
     stat.atime = new Date()
+    stat.nlink = 1
     stat.uid = process.getuid()
     stat.gid = process.getgid()
 
     stat.size = file.length
     stat.mode = 33206 // 0100666
-    debug('getattr stat', stat)
+    if (dbug) debug('getattr stat', stat)
     return cb(0, stat)
   }
 
@@ -136,7 +137,7 @@ module.exports = function (href, cb) {
   }
 
   handlers.read = function (filepath, handle, buf, len, offset, cb) {
-    if (!file) return cb(ENOENT)
+    if (!file) return cb(fuse.ENOENT)
 
     var range = offset + '-' + (offset + len - 1)
     var contentLength
@@ -144,7 +145,7 @@ module.exports = function (href, cb) {
     var rangeReq = request(href, {headers: {'Range': 'bytes=' + range}})
     rangeReq.on('response', function (res) {
       contentLength = +res.headers['content-length']
-      debug('requested', range, 'received', contentLength, 'bytes')
+      if (dbug) debug('requested', range, 'received', contentLength, 'bytes')
       loop()
     })
     var proxy = through()
@@ -159,31 +160,31 @@ module.exports = function (href, cb) {
   }
 
   handlers.write = function (path, handle, buf, len, offset, cb) {
-    cb(EPERM)
+    cb(fuse.EPERM)
   }
 
   handlers.unlink = function (path, cb) {
-    cb(EPERM)
+    cb(fuse.EPERM)
   }
 
   handlers.rename = function (src, dst, cb) {
-    cb(EPERM)
+    cb(fuse.EPERM)
   }
 
   handlers.mkdir = function (path, mode, cb) {
-    cb(EPERM)
+    cb(fuse.EPERM)
   }
 
   handlers.rmdir = function (path, cb) {
-    cb(EPERM)
+    cb(fuse.EPERM)
   }
 
   handlers.create = function (path, mode, cb) {
-    cb(EPERM)
+    cb(fuse.EPERM)
   }
 
   handlers.getxattr = function (path, name, buffer, length, offset, cb) {
-    cb(EPERM)
+    cb(fuse.ENODATA)
   }
 
   handlers.setxattr = function (path, name, buffer, length, offset, flags, cb) {
